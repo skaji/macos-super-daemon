@@ -54,7 +54,8 @@ macos-super-daemon exec sleep 3600
 macos-super-daemon exec /path/to/command arg1 arg2
 ```
 
-Commands inherit the current working directory and environment.
+Commands inherit the current working directory and environment, except for `HC_SCOPE`.
+This prevents Herdr from terminating them when the originating terminal closes.
 They run directly without a shell, and their stdin is disconnected.
 To use shell syntax, run a shell explicitly: `macos-super-daemon exec sh -c '...'`.
 

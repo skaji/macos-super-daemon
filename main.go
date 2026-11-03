@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -110,7 +111,14 @@ func (s *server) start(req request) (*process, error) {
 	defer s.mu.Unlock()
 	output := &processOutput{log: s.log, ready: make(chan struct{})}
 	cmd := exec.Command(req.Args[0], req.Args[1:]...)
-	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = req.Dir, req.Env, output, output
+	// Herdr uses HC_SCOPE to terminate processes when a terminal closes.
+	env := make([]string, 0, len(req.Env))
+	for _, variable := range req.Env {
+		if !strings.HasPrefix(variable, "HC_SCOPE=") {
+			env = append(env, variable)
+		}
+	}
+	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = req.Dir, env, output, output
 	cmd.WaitDelay = 2 * time.Second
 	// Look up the executable using the client's PATH rather than launchd's PATH.
 	if !filepath.IsAbs(req.Args[0]) && filepath.Dir(req.Args[0]) == "." {

@@ -214,3 +214,24 @@ func TestExternalSignal(t *testing.T) {
 		t.Fatalf("unexpected log: %q", output)
 	}
 }
+
+func TestHerdrScopeNotInherited(t *testing.T) {
+	s, dir := testServer(t)
+	p, err := s.start(request{
+		Args: []string{"/bin/sh", "-c", `printf 'scope=%s other=%s similar=%s\n' "${HC_SCOPE-unset}" "$OTHER" "$HC_SCOPE_EXTRA"`},
+		Dir:  dir,
+		Env:  []string{"HC_SCOPE=terminal-token", "OTHER=preserved", "HC_SCOPE_EXTRA=preserved"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	output, err := os.ReadFile(filepath.Join(dir, "log.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%d scope=unset other=preserved similar=preserved\n", p.PID)
+	if !strings.Contains(string(output), want) {
+		t.Fatalf("unexpected log: %q", output)
+	}
+}
