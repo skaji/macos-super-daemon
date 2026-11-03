@@ -43,6 +43,17 @@ func TestStartAndReap(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
+	for i, line := range lines {
+		timestamp, rest, ok := strings.Cut(line, " ")
+		if !ok {
+			t.Fatalf("missing timestamp: %q", line)
+		}
+		parsed, err := time.Parse(time.RFC3339, timestamp)
+		if err != nil || parsed.Format(time.RFC3339) != timestamp {
+			t.Fatalf("invalid timestamp %q: %v", timestamp, err)
+		}
+		lines[i] = rest
+	}
 	prefix := fmt.Sprintf("%d ", p.PID)
 	if len(lines) != 5 || !strings.HasPrefix(lines[0], prefix+"start command=") || lines[1] != prefix+"hello:"+realDir || lines[2] != prefix+"error" || lines[3] != prefix+"partial" || lines[4] != prefix+"exit code=7" {
 		t.Fatalf("unexpected log: %q", output)

@@ -1,6 +1,6 @@
 # macos-super-daemon
 
-Run commands as children of a single per-user macOS LaunchAgent. The server listens on a Unix domain socket in `~/.macos-super-daemon`. Commands inherit the invoking client's working directory and environment, and their stdout and stderr are combined in `~/.macos-super-daemon/log.txt`. Each line is prefixed with the PID; the log also records starts and exits. On startup, the server logs its start time and its complete environment, including any secrets in environment variables.
+Run commands as children of a single per-user macOS LaunchAgent. The server listens on a Unix domain socket in `~/.macos-super-daemon`. Commands inherit the invoking client's working directory and environment, and their stdout and stderr are combined in `~/.macos-super-daemon/log.txt`. Each line is prefixed with a timestamp in RFC 3339 format and the PID; the log also records starts and exits. On startup, the server logs its start time and its complete environment, including any secrets in environment variables.
 
 ## Installation
 

@@ -61,7 +61,7 @@ func (l *logFile) line(pid int, message []byte) error {
 }
 
 func (l *logFile) lineLocked(pid int, message []byte) error {
-	_, err := fmt.Fprintf(l.file, "%d %s\n", pid, message)
+	_, err := fmt.Fprintf(l.file, "%s %d %s\n", time.Now().Format(time.RFC3339), pid, message)
 	return err
 }
 
@@ -277,7 +277,7 @@ func runServer(dir string) error {
 	}
 	defer func() { _ = log.Close() }()
 	s := &server{log: &logFile{file: log}, children: make(map[int]*child)}
-	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start time=%s", started.Format(time.RFC3339Nano))); err != nil {
+	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start time=%s", started.Format(time.RFC3339))); err != nil {
 		return fmt.Errorf("write server start to log: %w", err)
 	}
 	for _, variable := range os.Environ() {
