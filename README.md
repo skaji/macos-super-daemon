@@ -74,7 +74,8 @@ To check the installed version, run `macos-super-daemon --version`.
 
 The server appends its log and all commands' stdout and stderr to `~/.macos-super-daemon/log.txt`.
 Each line begins with a timestamp and PID.
-The log includes command starts and exits, as well as the server's start time, environment, and shutdown.
+The log includes command starts and exits, stop requests, and the server's start time, environment, and shutdown.
+For a command terminated by a signal, the exit log includes the signal number and description.
 Environment variables can contain secrets, which will also be recorded in the log.
 
 Output without a trailing newline is logged when the command exits.

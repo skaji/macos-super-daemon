@@ -159,8 +159,12 @@ func (s *server) start(req request) (*process, error) {
 		if flushErr := output.flush(); flushErr != nil {
 			fmt.Fprintln(os.Stderr, "write log:", flushErr)
 		}
-		code := cmd.ProcessState.ExitCode()
-		if logErr := s.log.line(p.PID, fmt.Appendf(nil, "exit code=%d", code)); logErr != nil {
+		message := fmt.Appendf(nil, "exit code=%d", cmd.ProcessState.ExitCode())
+		if status, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			sig := status.Signal()
+			message = fmt.Appendf(nil, "exit signal=%d (%s)", sig, sig)
+		}
+		if logErr := s.log.line(p.PID, message); logErr != nil {
 			fmt.Fprintln(os.Stderr, "write log:", logErr)
 		}
 		s.mu.Lock()
@@ -232,8 +236,14 @@ func (s *server) handle(conn net.Conn) {
 			res.Process = p
 		}
 	case "stop":
+		if err := s.log.line(req.PID, []byte("stop requested signal=SIGTERM")); err != nil {
+			fmt.Fprintln(os.Stderr, "write log:", err)
+		}
 		if err := s.stop(req.PID); err != nil {
 			res.Error = err.Error()
+			if logErr := s.log.line(req.PID, fmt.Appendf(nil, "stop failed: %s", err)); logErr != nil {
+				fmt.Fprintln(os.Stderr, "write log:", logErr)
+			}
 		}
 	case "status":
 		s.mu.Lock()

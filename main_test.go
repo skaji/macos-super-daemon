@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,10 +104,26 @@ func TestStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.stop(p.PID); err != nil {
+	client, serverConn := net.Pipe()
+	defer func() { _ = client.Close() }()
+	go s.handle(serverConn)
+	if err := json.NewEncoder(client).Encode(request{Action: "stop", PID: p.PID}); err != nil {
 		t.Fatal(err)
 	}
+	var res response
+	if err := json.NewDecoder(client).Decode(&res); err != nil || res.Error != "" {
+		t.Fatalf("stop response: %+v, %v", res, err)
+	}
 	s.wg.Wait()
+	output, err := os.ReadFile(filepath.Join(dir, "log.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestLine := fmt.Sprintf("%d stop requested signal=SIGTERM\n", p.PID)
+	exitLine := fmt.Sprintf("%d exit signal=%d (%s)\n", p.PID, syscall.SIGTERM, syscall.SIGTERM)
+	if start, end := strings.Index(string(output), requestLine), strings.Index(string(output), exitLine); start < 0 || end < start {
+		t.Fatalf("unexpected log: %q", output)
+	}
 	if len(s.children) != 0 {
 		t.Fatal("child was not removed")
 	}
@@ -171,5 +189,28 @@ func TestShutdown(t *testing.T) {
 	}
 	if len(s.children) != 0 {
 		t.Fatal("children were not removed")
+	}
+}
+
+func TestExternalSignal(t *testing.T) {
+	s, dir := testServer(t)
+	p, err := s.start(request{Args: []string{"/bin/sleep", "60"}, Dir: dir, Env: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	cmd := s.children[p.PID].cmd
+	s.mu.Unlock()
+	if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	output, err := os.ReadFile(filepath.Join(dir, "log.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%d exit signal=%d (%s)\n", p.PID, syscall.SIGKILL, syscall.SIGKILL)
+	if !strings.Contains(string(output), want) || strings.Contains(string(output), "stop requested") {
+		t.Fatalf("unexpected log: %q", output)
 	}
 }
