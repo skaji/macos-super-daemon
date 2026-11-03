@@ -1,0 +1,20 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+    goarch:
+      - arm64
+
+archives:
+  - formats: ["tar.gz"]
+    name_template: "{{ .ProjectName }}-{{- .Os }}-{{- .Arch }}"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
