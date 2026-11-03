@@ -1,6 +1,6 @@
 # macos-super-daemon
 
-Run commands as children of a single per-user macOS LaunchAgent. The server listens on a Unix domain socket in `~/.macos-super-daemon`. Commands inherit the invoking client's working directory and environment, and their stdout and stderr are written to separate files in that directory.
+Run commands as children of a single per-user macOS LaunchAgent. The server listens on a Unix domain socket in `~/.macos-super-daemon`. Commands inherit the invoking client's working directory and environment, and their stdout and stderr are combined in `~/.macos-super-daemon/log.txt`. Each line is prefixed with the PID; the log also records starts and exits. On startup, the server logs its start time and its complete environment, including any secrets in environment variables.
 
 ## Installation
 
@@ -47,6 +47,7 @@ To unload it, run `launchctl bootout "gui/$(id -u)/com.github.skaji.macos-super-
 macos-super-daemon exec sleep 3600
 macos-super-daemon exec /path/to/command arg1 arg2
 macos-super-daemon status
+macos-super-daemon stop PID
 ```
 
-`exec` starts the command directly, without a shell. Use `exec sh -c '...'` explicitly for shell syntax. The command's stdin is disconnected. `exec` prints the process ID and log paths; `status` shows running and exited children from the current server instance. An exited child is reaped and is not restarted. Status history is lost when the server restarts, but log files remain. When the server stops, it kills and reaps its direct children. Processes that detach or spawn descendants are not tracked individually.
+`exec` starts the command directly, without a shell. Use `exec sh -c '...'` explicitly for shell syntax. The command's stdin is disconnected. `exec` prints the PID and log path; `status` prints a JSON array of running children. `stop PID` sends SIGTERM to a running child and returns without waiting for it to exit. An exited child is reaped and removed from status; it is not restarted. The log is retained when the server restarts. The operating system can reuse PIDs after processes exit. Output without a trailing newline is logged when the process exits. Output pipes inherited by descendants are closed two seconds after the direct child exits. When the server stops, it sends SIGTERM to its direct children, waits up to two seconds, then sends SIGKILL to any remaining children and reaps them. Processes that detach or spawn descendants are not tracked individually.

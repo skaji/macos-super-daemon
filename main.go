@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,22 +18,22 @@ import (
 
 type request struct {
 	Action string   `json:"action"`
+	PID    int      `json:"pid,omitempty"`
 	Args   []string `json:"args,omitempty"`
 	Dir    string   `json:"dir,omitempty"`
 	Env    []string `json:"env,omitempty"`
 }
 
 type process struct {
-	ID       int        `json:"id"`
-	PID      int        `json:"pid"`
-	Args     []string   `json:"args"`
-	Dir      string     `json:"dir"`
-	Started  time.Time  `json:"started"`
-	Exited   *time.Time `json:"exited,omitempty"`
-	ExitCode *int       `json:"exit_code,omitempty"`
-	Error    string     `json:"error,omitempty"`
-	Stdout   string     `json:"stdout"`
-	Stderr   string     `json:"stderr"`
+	PID     int       `json:"pid"`
+	Args    []string  `json:"args"`
+	Dir     string    `json:"dir"`
+	Started time.Time `json:"started"`
+}
+
+type child struct {
+	process process
+	cmd     *exec.Cmd
 }
 
 type response struct {
@@ -42,11 +43,58 @@ type response struct {
 }
 
 type server struct {
-	dir       string
-	mu        sync.Mutex
-	processes []*process
-	children  map[int]*exec.Cmd
-	wg        sync.WaitGroup
+	log      *logFile
+	mu       sync.Mutex
+	children map[int]*child
+	wg       sync.WaitGroup
+}
+
+type logFile struct {
+	mu   sync.Mutex
+	file *os.File
+}
+
+func (l *logFile) line(pid int, message []byte) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.lineLocked(pid, message)
+}
+
+func (l *logFile) lineLocked(pid int, message []byte) error {
+	_, err := fmt.Fprintf(l.file, "%d %s\n", pid, message)
+	return err
+}
+
+type processOutput struct {
+	log     *logFile
+	pid     int
+	ready   chan struct{}
+	pending []byte
+}
+
+func (w *processOutput) Write(p []byte) (int, error) {
+	<-w.ready
+	w.pending = append(w.pending, p...)
+	for {
+		i := bytes.IndexByte(w.pending, '\n')
+		if i < 0 {
+			break
+		}
+		if err := w.log.line(w.pid, w.pending[:i]); err != nil {
+			return 0, err
+		}
+		w.pending = w.pending[i+1:]
+	}
+	return len(p), nil
+}
+
+func (w *processOutput) flush() error {
+	if len(w.pending) == 0 {
+		return nil
+	}
+	err := w.log.line(w.pid, w.pending)
+	w.pending = nil
+	return err
 }
 
 func (s *server) start(req request) (*process, error) {
@@ -58,23 +106,10 @@ func (s *server) start(req request) (*process, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	id := len(s.processes) + 1
-	// Include a timestamp because IDs restart when the server restarts.
-	prefix := fmt.Sprintf("%s-%d", time.Now().Format("20060102-150405.000000000"), id)
-	stdout := filepath.Join(s.dir, prefix+".stdout.log")
-	stderr := filepath.Join(s.dir, prefix+".stderr.log")
-	out, err := os.OpenFile(stdout, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	errout, err := os.OpenFile(stderr, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		_ = out.Close()
-		_ = os.Remove(stdout)
-		return nil, err
-	}
+	output := &processOutput{log: s.log, ready: make(chan struct{})}
 	cmd := exec.Command(req.Args[0], req.Args[1:]...)
-	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = req.Dir, req.Env, out, errout
+	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = req.Dir, req.Env, output, output
+	cmd.WaitDelay = 2 * time.Second
 	// Look up the executable using the client's PATH rather than launchd's PATH.
 	if !filepath.IsAbs(req.Args[0]) && filepath.Dir(req.Args[0]) == "." {
 		path := ""
@@ -100,40 +135,81 @@ func (s *server) start(req request) (*process, error) {
 			}
 		}
 		if !found {
-			_ = out.Close()
-			_ = errout.Close()
-			_ = os.Remove(stdout)
-			_ = os.Remove(stderr)
 			return nil, fmt.Errorf("command not found in PATH: %s", req.Args[0])
 		}
 	}
+	// Hold the log lock until the start record is written so output cannot precede it.
+	s.log.mu.Lock()
 	if err := cmd.Start(); err != nil {
-		_ = out.Close()
-		_ = errout.Close()
-		_ = os.Remove(stdout)
-		_ = os.Remove(stderr)
+		s.log.mu.Unlock()
 		return nil, err
 	}
-	_ = out.Close()
-	_ = errout.Close()
-	p := &process{ID: id, PID: cmd.Process.Pid, Args: req.Args, Dir: req.Dir, Started: time.Now(), Stdout: stdout, Stderr: stderr}
-	s.processes = append(s.processes, p)
-	s.children[p.PID] = cmd
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		err := cmd.Wait()
-		now, code := time.Now(), cmd.ProcessState.ExitCode()
+	output.pid = cmd.Process.Pid
+	if err := s.log.lineLocked(output.pid, fmt.Appendf(nil, "start command=%q", req.Args)); err != nil {
+		fmt.Fprintln(os.Stderr, "write log:", err)
+	}
+	close(output.ready)
+	s.log.mu.Unlock()
+	p := &process{PID: cmd.Process.Pid, Args: req.Args, Dir: req.Dir, Started: time.Now()}
+	s.children[p.PID] = &child{process: *p, cmd: cmd}
+	s.wg.Go(func() {
+		_ = cmd.Wait()
+		if flushErr := output.flush(); flushErr != nil {
+			fmt.Fprintln(os.Stderr, "write log:", flushErr)
+		}
+		code := cmd.ProcessState.ExitCode()
+		if logErr := s.log.line(p.PID, fmt.Appendf(nil, "exit code=%d", code)); logErr != nil {
+			fmt.Fprintln(os.Stderr, "write log:", logErr)
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		p.Exited, p.ExitCode = &now, &code
-		if err != nil {
-			p.Error = err.Error()
+		if current := s.children[p.PID]; current != nil && current.cmd == cmd {
+			delete(s.children, p.PID)
 		}
-		delete(s.children, p.PID)
-	}()
+	})
 	copy := *p
 	return &copy, nil
+}
+
+func (s *server) stop(pid int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	child, ok := s.children[pid]
+	if !ok {
+		return fmt.Errorf("no running child with PID %d", pid)
+	}
+	if err := child.cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		return fmt.Errorf("send SIGTERM to PID %d: %w", pid, err)
+	}
+	return nil
+}
+
+func (s *server) shutdown(timeout time.Duration) {
+	s.mu.Lock()
+	for _, child := range s.children {
+		_ = child.cmd.Process.Signal(syscall.SIGTERM)
+	}
+	s.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+	}
+
+	s.mu.Lock()
+	for _, child := range s.children {
+		_ = child.cmd.Process.Kill()
+	}
+	s.mu.Unlock()
+	<-done
 }
 
 func (s *server) handle(conn net.Conn) {
@@ -153,11 +229,15 @@ func (s *server) handle(conn net.Conn) {
 		} else {
 			res.Process = p
 		}
+	case "stop":
+		if err := s.stop(req.PID); err != nil {
+			res.Error = err.Error()
+		}
 	case "status":
 		s.mu.Lock()
-		res.Processes = make([]process, len(s.processes))
-		for i, p := range s.processes {
-			res.Processes[i] = *p
+		res.Processes = make([]process, 0, len(s.children))
+		for _, child := range s.children {
+			res.Processes = append(res.Processes, child.process)
 		}
 		s.mu.Unlock()
 	default:
@@ -167,6 +247,7 @@ func (s *server) handle(conn net.Conn) {
 }
 
 func runServer(dir string) error {
+	started := time.Now()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -190,7 +271,20 @@ func runServer(dir string) error {
 	if err := os.Chmod(socket, 0o600); err != nil {
 		return err
 	}
-	s := &server{dir: dir, children: make(map[int]*exec.Cmd)}
+	log, err := os.OpenFile(filepath.Join(dir, "log.txt"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = log.Close() }()
+	s := &server{log: &logFile{file: log}, children: make(map[int]*child)}
+	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start time=%s", started.Format(time.RFC3339Nano))); err != nil {
+		return fmt.Errorf("write server start to log: %w", err)
+	}
+	for _, variable := range os.Environ() {
+		if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server env %q", variable)); err != nil {
+			return fmt.Errorf("write server environment to log: %w", err)
+		}
+	}
 	var handlers sync.WaitGroup
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -212,17 +306,10 @@ func runServer(dir string) error {
 			}
 			return err
 		}
-		handlers.Add(1)
-		go func() { defer handlers.Done(); s.handle(conn) }()
+		handlers.Go(func() { s.handle(conn) })
 	}
 	handlers.Wait()
-	// Terminate direct children when the server exits, then reap them.
-	s.mu.Lock()
-	for _, cmd := range s.children {
-		_ = cmd.Process.Kill()
-	}
-	s.mu.Unlock()
-	s.wg.Wait()
+	s.shutdown(2 * time.Second)
 	return nil
 }
 
@@ -247,7 +334,7 @@ func call(dir string, req request) (response, error) {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: macos-super-daemon server | exec command [args...] | status")
+		return errors.New("usage: macos-super-daemon server | exec command [args...] | stop PID | status")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -272,7 +359,20 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Started %d (PID %d)\nstdout: %s\nstderr: %s\n", res.Process.ID, res.Process.PID, res.Process.Stdout, res.Process.Stderr)
+		fmt.Printf("Started PID %d\nlog: %s\n", res.Process.PID, filepath.Join(dir, "log.txt"))
+		return nil
+	case "stop":
+		if len(args) != 2 {
+			return errors.New("usage: macos-super-daemon stop PID")
+		}
+		pid, err := strconv.Atoi(args[1])
+		if err != nil || pid <= 0 {
+			return fmt.Errorf("invalid PID: %s", args[1])
+		}
+		if _, err := call(dir, request{Action: "stop", PID: pid}); err != nil {
+			return err
+		}
+		fmt.Printf("Sent SIGTERM to PID %d\n", pid)
 		return nil
 	case "status":
 		if len(args) != 1 {
@@ -282,14 +382,12 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		for _, p := range res.Processes {
-			state := "running"
-			if p.Exited != nil {
-				state = "exited (" + strconv.Itoa(*p.ExitCode) + ")"
-			}
-			fmt.Printf("%d\t%d\t%s\t%q\n  cwd: %s\n  stdout: %s\n  stderr: %s\n", p.ID, p.PID, state, p.Args, p.Dir, p.Stdout, p.Stderr)
+		if res.Processes == nil {
+			res.Processes = []process{}
 		}
-		return nil
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(res.Processes)
 	default:
 		return fmt.Errorf("unknown subcommand: %s", args[0])
 	}
