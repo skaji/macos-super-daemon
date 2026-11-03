@@ -16,6 +16,8 @@ import (
 	"time"
 )
 
+var version = "dev"
+
 type request struct {
 	Action string   `json:"action"`
 	PID    int      `json:"pid,omitempty"`
@@ -334,7 +336,14 @@ func call(dir string, req request) (response, error) {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: macos-super-daemon server | exec command [args...] | stop PID | status")
+		return errors.New("usage: macos-super-daemon --version | server | exec command [args...] | stop PID | status")
+	}
+	if args[0] == "--version" {
+		if len(args) != 1 {
+			return errors.New("usage: macos-super-daemon --version")
+		}
+		_, err := fmt.Fprintln(os.Stdout, version)
+		return err
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
