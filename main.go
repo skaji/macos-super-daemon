@@ -295,7 +295,14 @@ func runServer(dir string) error {
 	defer close(done)
 	go func() {
 		select {
-		case <-stop:
+		case sig := <-stop:
+			name := "SIGTERM"
+			if sig == os.Interrupt {
+				name = "SIGINT"
+			}
+			if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server stopping signal=%s", name)); err != nil {
+				fmt.Fprintln(os.Stderr, "write log:", err)
+			}
 			_ = listener.Close()
 		case <-done:
 		}
@@ -312,6 +319,9 @@ func runServer(dir string) error {
 	}
 	handlers.Wait()
 	s.shutdown(2 * time.Second)
+	if err := s.log.line(os.Getpid(), []byte("server stopped")); err != nil {
+		return fmt.Errorf("write server stop to log: %w", err)
+	}
 	return nil
 }
 
