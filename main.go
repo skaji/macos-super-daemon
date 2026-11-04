@@ -181,8 +181,8 @@ func (s *server) start(req request) (*process, error) {
 			delete(s.children, p.PID)
 		}
 	})
-	copy := *p
-	return &copy, nil
+	result := *p
+	return &result, nil
 }
 
 func (s *server) stop(pid int) error {
