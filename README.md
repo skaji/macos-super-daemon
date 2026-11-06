@@ -16,34 +16,16 @@ curl -fL https://github.com/skaji/macos-super-daemon/releases/latest/download/ma
 
 Make sure `~/.local/bin` is in your `PATH` to run `macos-super-daemon` from the command line.
 
-Create `~/Library/LaunchAgents/com.github.skaji.macos-super-daemon.plist`,
-replacing `/Users/YOUR_NAME/.local/bin/macos-super-daemon` with the absolute path to the executable:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.github.skaji.macos-super-daemon</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/YOUR_NAME/.local/bin/macos-super-daemon</string>
-    <string>server</string>
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-</dict>
-</plist>
-```
-
-Load the LaunchAgent in your graphical session:
+Install and start the LaunchAgent in your graphical session:
 
 ```sh
-launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.github.skaji.macos-super-daemon.plist"
+macos-super-daemon service install
+macos-super-daemon service start
 ```
+
+`service install` creates `~/Library/LaunchAgents/com.github.skaji.macos-super-daemon.plist`
+using the path of the current executable. It does not overwrite an existing plist.
+If you move the executable, remove the plist and run `service install` again.
 
 ## Usage
 
@@ -84,20 +66,20 @@ If a command's descendants inherit its output pipes, the pipes are closed two se
 
 ## Restarting and unloading
 
-To restart the server, for example after updating the binary, send it SIGTERM:
+To restart the server, for example after updating the binary:
 
 ```sh
-launchctl kill SIGTERM "gui/$(id -u)/com.github.skaji.macos-super-daemon"
+macos-super-daemon service restart
 ```
 
-The server sends SIGTERM to its running child processes, waits up to two seconds,
-and then sends SIGKILL to any that remain. launchd restarts the server automatically,
-but you need to start your commands again yourself.
+This sends SIGTERM to the server. The server sends SIGTERM to its running child
+processes, waits up to two seconds, and then sends SIGKILL to any that remain.
+launchd restarts the server automatically, but you need to start your commands again yourself.
 
 To unload the LaunchAgent:
 
 ```sh
-launchctl bootout "gui/$(id -u)/com.github.skaji.macos-super-daemon"
+macos-super-daemon service stop
 ```
 
-If you change the plist, unload the agent and load it again with the `bootstrap` command above.
+If you change the plist, stop the agent and start it again with `service start`.

@@ -364,7 +364,7 @@ func call(dir string, req request) (response, error) {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: macos-super-daemon --version | server | exec command [args...] | stop PID | status")
+		return errors.New("usage: macos-super-daemon --version | server | exec command [args...] | stop PID | status | service install|start|restart|stop")
 	}
 	if args[0] == "--version" {
 		if len(args) != 1 {
@@ -379,6 +379,8 @@ func run(args []string) error {
 	}
 	dir := filepath.Join(home, ".macos-super-daemon")
 	switch args[0] {
+	case "service":
+		return runService(home, args[1:])
 	case "server":
 		if len(args) != 1 {
 			return errors.New("usage: macos-super-daemon server")
