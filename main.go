@@ -366,6 +366,10 @@ func run(args []string) error {
 	if len(args) == 0 {
 		return errors.New("usage: macos-super-daemon --version | server | exec command [args...] | stop PID | status | service install|start|restart|stop")
 	}
+	if message, ok := helpMessage(args); ok {
+		_, err := fmt.Fprint(os.Stdout, message)
+		return err
+	}
 	if args[0] == "--version" {
 		if len(args) != 1 {
 			return errors.New("usage: macos-super-daemon --version")

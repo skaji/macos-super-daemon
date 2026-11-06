@@ -51,7 +51,8 @@ macos-super-daemon stop PID
 `stop` returns after sending the signal; it does not wait for the process to exit.
 When a command exits, it is removed from `status` and is not restarted.
 
-To check the installed version, run `macos-super-daemon --version`.
+Run `macos-super-daemon --help` or `macos-super-daemon service --help` for
+command help. To check the installed version, run `macos-super-daemon --version`.
 
 ## Logs
 
