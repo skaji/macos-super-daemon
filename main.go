@@ -121,7 +121,7 @@ func (s *server) start(req request) (*process, error) {
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = req.Dir, env, output, output
 	cmd.WaitDelay = 2 * time.Second
 	// Look up the executable using the client's PATH rather than launchd's PATH.
-	if !filepath.IsAbs(req.Args[0]) && filepath.Dir(req.Args[0]) == "." {
+	if !strings.ContainsRune(req.Args[0], os.PathSeparator) {
 		path := ""
 		for _, e := range req.Env {
 			if len(e) >= 5 && e[:5] == "PATH=" {

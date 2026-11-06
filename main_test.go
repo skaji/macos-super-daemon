@@ -86,6 +86,28 @@ func TestConcurrentOutput(t *testing.T) {
 	}
 }
 
+func TestStartRelativeCommand(t *testing.T) {
+	s, dir := testServer(t)
+	pathDir := t.TempDir()
+	for path, contents := range map[string]string{
+		filepath.Join(dir, "foo.sh"):     "#!/bin/sh\necho local\n",
+		filepath.Join(pathDir, "foo.sh"): "#!/bin/sh\necho path\n",
+	} {
+		if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := s.start(request{Args: []string{"./foo.sh"}, Dir: dir, Env: []string{"PATH=" + pathDir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.wg.Wait()
+	output, err := os.ReadFile(filepath.Join(dir, "log.txt"))
+	if err != nil || !strings.Contains(string(output), " local\n") || strings.Contains(string(output), " path\n") {
+		t.Fatalf("unexpected log: %q, %v", output, err)
+	}
+}
+
 func TestStartMissingCommand(t *testing.T) {
 	s, dir := testServer(t)
 	_, err := s.start(request{Args: []string{"missing-command"}, Dir: dir, Env: []string{"PATH=" + dir}})
