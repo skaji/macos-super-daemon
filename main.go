@@ -267,7 +267,6 @@ func (s *server) handle(conn net.Conn) {
 }
 
 func runServer(dir string) error {
-	started := time.Now()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -297,7 +296,7 @@ func runServer(dir string) error {
 	}
 	defer func() { _ = log.Close() }()
 	s := &server{log: &logFile{file: log}, children: make(map[int]*child)}
-	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start time=%s", started.Format(time.RFC3339))); err != nil {
+	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start version=%s", version)); err != nil {
 		return fmt.Errorf("write server start to log: %w", err)
 	}
 	var handlers sync.WaitGroup
