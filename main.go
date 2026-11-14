@@ -300,11 +300,6 @@ func runServer(dir string) error {
 	if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server start time=%s", started.Format(time.RFC3339))); err != nil {
 		return fmt.Errorf("write server start to log: %w", err)
 	}
-	for _, variable := range os.Environ() {
-		if err := s.log.line(os.Getpid(), fmt.Appendf(nil, "server env %q", variable)); err != nil {
-			return fmt.Errorf("write server environment to log: %w", err)
-		}
-	}
 	var handlers sync.WaitGroup
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
